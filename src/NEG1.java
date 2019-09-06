@@ -5,7 +5,7 @@ import SeniorProject.Negotiation.Negotiator;
 
 import java.util.Random;
 
-public class NEG0 extends NegotiationAgent {
+public class NEG1 extends NegotiationAgent {
     private Random randomMachine = new Random();
 
     public double getBaseRatio(NegotiationSession session) {
@@ -13,7 +13,7 @@ public class NEG0 extends NegotiationAgent {
     }
 
     public double getOfferRatio(NegotiationSession session) {
-        return (getBaseRatio(session) + randomMachine.nextDouble() * 0.1) * (getBidRanking().size() / 2.0);
+        return (getBaseRatio(session) + randomMachine.nextDouble() * 0.05) * (getBidRanking().size() / 3.0);
     }
 
     @Override

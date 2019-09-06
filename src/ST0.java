@@ -10,7 +10,9 @@ public class ST0 extends AI {
     private Random randomMachine = new Random();
     private HashMap<StructureType, Double[]> locScores;
     private HashMap<ResourceType, Double> resourceWeights = new HashMap<>();
+    private ActionType resourceWeights_target;
     private int sequentialSkips = 0;
+    private Player me;
 
     // Initialization of action categories
     private ArrayList<MoveRobber> actions_robber = new ArrayList<>();
@@ -22,12 +24,7 @@ public class ST0 extends AI {
 
     @Override
     public ArrayList<IAction> createActions(boolean isInitial) {
-        // UpgradeSettlement - CreateSettlement comparison
-        // Cannot get any points from impossible Settlement Actions.
-        // Creating multiple possible actions will have bonus score.
-        // Calculate the score with thinking of the achieved goal (for resources).
-
-        initialization();
+        cleaning();
 
         /// region If robber must be moved, move the robber.
         if (actions_robber.size() > 0) {
@@ -54,8 +51,10 @@ public class ST0 extends AI {
         }
         /// endregion
 
+        // Do the trade action with bank, if there is
+        // an appropriate one.
         if (tradeBank_actions.size() > 0) {
-            System.out.println("I can do TradeWithBank(s).");
+            //System.out.println("I can do TradeWithBank(s).");
 
             ArrayList<ArrayList<? extends IAction>> action_categories = new ArrayList<>();
             action_categories.add(actions_settlement);
@@ -69,11 +68,11 @@ public class ST0 extends AI {
             action_category_costs.add(DrawDevelopmentCard.COST);
             action_category_costs.add(CreateRoad.COST);
 
-            ArrayList<Action> actions_category_enums = new ArrayList<>();
-            actions_category_enums.add(Action.CreateSettlement);
-            actions_category_enums.add(Action.UpgradeSettlement);
-            actions_category_enums.add(Action.DrawDevCard);
-            actions_category_enums.add(Action.CreateRoad);
+            ArrayList<ActionType> actions_category_enums = new ArrayList<>();
+            actions_category_enums.add(ActionType.CreateSettlement);
+            actions_category_enums.add(ActionType.UpgradeSettlement);
+            actions_category_enums.add(ActionType.DrawDevCard);
+            actions_category_enums.add(ActionType.CreateRoad);
 
             ArrayList<ArrayList<TradeWithBank>> allSolvingActions = new ArrayList<>();
 
@@ -82,26 +81,37 @@ public class ST0 extends AI {
                 Resource actions_cost = action_category_costs.get(i);
 
                 if (actions_group.size() == 0) {
-                    System.out.println("I cannot do any " + actions_category_enums.get(i) + "(s).");
+                    //System.out.println("I cannot do any " + actions_category_enums.get(i) + "(s).");
 
                     allSolvingActions.add(new ArrayList<>());
 
-                    Resource remainingResources = new Resource(getOwner().getResource());
-                    remainingResources.disjoin(actions_cost);
+                    State.StateBuilder stateBuilder = new State.StateBuilder(getVirtualBoard());
+                    State allAffordableState = stateBuilder.setResource(getOwner().getIndex(), new Resource(4, 4, 4, 4, 4)).build();
+                    ArrayList<IAction> allAffordableState_possibleActions = allAffordableState.getPossibleActions(getOwner().getIndex());
+                    int validActions_size = 0;
+                    for (IAction _action : allAffordableState_possibleActions) {
+                        if (_action.getClass().equals(action_categories.get(i).getClass()));
+                            validActions_size++;
+                    }
 
-                    if (-remainingResources.getNegatives().getSum() <= remainingResources.getPositives().getSum()) {
-                        for (TradeWithBank tradeWithBank : tradeBank_actions) {
-                            Resource missingResources_checkPoint = new Resource(remainingResources);
+                    if (validActions_size > 0) {
+                        Resource remainingResources = new Resource(getOwner().getResource());
+                        remainingResources.disjoin(actions_cost);
 
-                            remainingResources.join(tradeWithBank.getTakenResources());
-                            remainingResources.disjoin(tradeWithBank.getGivenResources());
+                        if (-remainingResources.getNegatives().getSum() <= remainingResources.getPositives().getSum()) {
+                            for (TradeWithBank tradeWithBank : tradeBank_actions) {
+                                Resource missingResources_checkPoint = new Resource(remainingResources);
 
-                            if (remainingResources.getNegatives().getSum() == 0) {
-                                allSolvingActions.get(i).add(tradeWithBank);
-                                System.out.println("I can fix this problem with " + tradeWithBank);
+                                remainingResources.join(tradeWithBank.getTakenResources());
+                                remainingResources.disjoin(tradeWithBank.getGivenResources());
+
+                                if (remainingResources.getNegatives().getSum() == 0) {
+                                    allSolvingActions.get(i).add(tradeWithBank);
+                                    //System.out.println("I can fix this problem with " + tradeWithBank);
+                                }
+
+                                remainingResources = missingResources_checkPoint;
                             }
-
-                            remainingResources = missingResources_checkPoint;
                         }
                     }
                 }
@@ -110,37 +120,65 @@ public class ST0 extends AI {
                 }
             }
 
+            int affordableAction_count = 0;
+            for (ActionType actionType : ActionType.values()) {
+                if (Board.isAffordable(actionType, me.getResource())) // ?
+                    affordableAction_count++;
+            }
+
             double maxScore = Integer.MIN_VALUE;
             TradeWithBank maxScore_owner = null;
             for (int i = 0; i < allSolvingActions.size(); i++) {
                 ArrayList<TradeWithBank> solving_tradeBanks = allSolvingActions.get(i);
-                Action action = actions_category_enums.get(i);
+                ActionType action = actions_category_enums.get(i);
 
-                if (solving_tradeBanks.size() != 0)
-                    System.out.println(action + " solver's scores: ");
+                /*if (solving_tradeBanks.size() != 0)
+                    System.out.println(action + " solver's scores: ");*/
 
                 for (int j = 0; j < solving_tradeBanks.size(); j++) {
                     TradeWithBank tradeWithBank = solving_tradeBanks.get(j);
 
                     double score = 0;
 
-                    score += (action == Action.CreateSettlement) ? 1 : 0;
-                    score += (action == Action.UpgradeSettlement) ? 1 : 0;
+                    score += (action == ActionType.CreateSettlement) ? 1 : 0;
+                    score += (action == ActionType.UpgradeSettlement) ? 1 : 0;
 
-                    for (ResourceType resourceType : ResourceType.values())
-                        score -= tradeWithBank.getGivenResources().get(resourceType) * resourceWeights.get(resourceType);
+                    for (ResourceType resourceType : ResourceType.values()) {
+                        if (resourceWeights_target != action)
+                            score -= tradeWithBank.getGivenResources().get(resourceType) * resourceWeights.get(resourceType);
+                        else
+                            score -= tradeWithBank.getGivenResources().get(resourceType) * 0.2;
+                    }
+
+                    for (int k = 0; k < allSolvingActions.size(); k++) {
+                        if (actions_category_enums.get(k) == action)
+                            score += 0.3;
+                    }
+
+                    int afterAffordableAction_count = 0;
+                    Resource afterResource = new Resource(me.getResource()); // ?
+                    afterResource.disjoin(tradeWithBank.getGivenResources());
+                    afterResource.join(tradeWithBank.getTakenResources());
+
+                    for (ActionType actionType : ActionType.values()) {
+                        if (Board.isAffordable(actionType, afterResource))
+                            afterAffordableAction_count++;
+                    }
+
+                    score -= (affordableAction_count - afterAffordableAction_count) * 0.3;
 
                     if (score > maxScore) {
                         maxScore = score;
                         maxScore_owner = tradeWithBank;
                     }
 
-                    System.out.println(tradeWithBank + " Score: " + score);
+                    //System.out.println(tradeWithBank + " Score: " + score);
                 }
             }
 
             if (maxScore_owner != null && maxScore > -1) {
-                System.out.println("I chose " + maxScore_owner);
+                //System.out.println("I chose " + maxScore_owner);
+
                 doAction(maxScore_owner);
             }
         }
@@ -151,8 +189,6 @@ public class ST0 extends AI {
 
             //region While a settlement can be built, build it.
             Double[] _locScores = locScores.get(SETTLEMENT);
-            makeAllPositive(_locScores);
-
             while (actions_settlement.size() > 0) {
                 // Mark all of them as impossible
                 for (int i = 0; i < _locScores.length; i++)
@@ -182,8 +218,6 @@ public class ST0 extends AI {
 
             //region If a good road can be built, build it.
             _locScores = locScores.get(SETTLEMENT);
-            makeAllPositive(_locScores);
-
             if (actions_road.size() > 0) {
                 // Mark the adjacent locations of settlements as impossible.
                 for (Location location : getVirtualBoard().getLocations()) {
@@ -337,16 +371,20 @@ public class ST0 extends AI {
                 break;
         }
 
-        /// region Do all the DrawDevelopmentCard(s)
-        while (actions_drawCard.size() > 0)
-            doAction(actions_drawCard.get(0));
-
         ///region Do UpgradeSettlement(s) randomly.
         while (actions_upgrade.size() > 0) {
             IAction action = actions_upgrade.get(randomMachine.nextInt(actions_upgrade.size()));
             doAction(action);
         }
         ///endregion
+
+        if (actions_drawCard.size() > 0) {
+            if (getVirtualBoard().getLastMaxKnight_owner() != null && getVirtualBoard().getLastMaxKnight_owner().getIndex() != me.getIndex() && getVirtualBoard().getKnights_max() - me.getKnights() <= 1
+                || randomMachine.nextInt(3) == 0 || getVirtualBoard().getLastMaxKnight_owner() == null && randomMachine.nextInt(4) == 0
+                || me.getVictoryPoint() + 1 >= Global.MAX_VICTORY_POINTS) {
+                doAction(actions_drawCard.get(0));
+            }
+        }
 
         if (getActionsDone().size() == 0) {
             // If the AI has skipped too many turns,
@@ -383,49 +421,28 @@ public class ST0 extends AI {
 
     @Override
     public void updateBidRanking() {
-        updateResourceWeights();
-        System.out.println("    " + getOwner() + "'s Resource Weights: " + resourceWeights);
+        updateResourceWeights(getBoard());
+        //System.out.println("    " + getOwner() + "'s Resource Weights: " + resourceWeights);
 
-        Resource desiredResource;
-        Action desiredAction;
+        Resource afterResource;
         clearBidRanking();
 
-        for (int i = 0; i < Action.values().length; i++) {
-            desiredResource = new Resource(getOwner().getResource());
-            desiredAction = Action.values()[i];
+        for (ActionType desiredAction : ActionType.values()) {
+            afterResource = new Resource(getOwner().getResource());
+            afterResource.disjoin(Global.getCost(desiredAction));
 
-            // Ignore the ineffective action
-            if (desiredAction == Action.ZeroCost)
-                continue;
-
-            if (desiredAction == Action.CreateRoad) {
-                desiredResource.disjoin(Road.COST);
-                if (desiredResource.getPositives().getSum() > 0)
-                    resourceAnalyze(desiredResource);
-            } else if (desiredAction == Action.CreateSettlement) {
-                desiredResource.disjoin(Settlement.COST);
-                if (desiredResource.getPositives().getSum() >= 0) {
-                    resourceAnalyze(desiredResource);
-                }
-            } else if (desiredAction == Action.UpgradeSettlement) {
-                desiredResource.disjoin(City.COST);
-                if (desiredResource.getPositives().getSum() >= 0)
-                    resourceAnalyze(desiredResource);
-            } else if (desiredAction == Action.DrawDevCard) {
-                desiredResource.disjoin(DrawDevelopmentCard.COST);
-                if (desiredResource.getPositives().getSum() >= 0)
-                    resourceAnalyze(desiredResource);
-            }
+            if (afterResource.getPositives().getSum() > 0 && afterResource.getNegatives().getSum() < 0)
+                resourceAnalyze(afterResource);
         }
     }
 
-    private void resourceAnalyze(Resource desiredResource) {
+    private void resourceAnalyze(Resource afterResource) {
         Resource wantedResource = new Resource();
-        Resource freeResource = new Resource(desiredResource);
+        Resource freeResource = new Resource(afterResource);
 
-        for (ResourceType type : freeResource.keySet()) {
-            if (freeResource.get(type) < 0) {
-                wantedResource.add(type, -freeResource.get(type));
+        for (ResourceType type : ResourceType.values()) {
+            if (afterResource.get(type) < 0) {
+                wantedResource.replace(type, -freeResource.get(type));
                 freeResource.replace(type, 0);
             }
         }
@@ -440,64 +457,56 @@ public class ST0 extends AI {
         if (need > 1)
             createBids(type, need - 1, freeResource);
 
-        Resource bid;
-        for (ResourceType givenType : freeResource.keySet()) {
-            if (freeResource.get(givenType) > 0) {
-                bid = new Resource();
-                bid.add(type, need);
+        Resource change = new Resource();
+        change.add(type, need);
 
-                ArrayList<ResourceType> freeTypeList = new ArrayList<>();
-                for (int i = 0; i < ResourceType.values().length; i++) {
-                    if (ResourceType.values()[i] != type)
-                        freeTypeList.add(ResourceType.values()[i]);
-                }
+        ArrayList<ResourceType> freeTypeList = new ArrayList<>();
+        for (int i = 0; i < ResourceType.values().length; i++) {
+            if (ResourceType.values()[i] != type)
+                freeTypeList.add(ResourceType.values()[i]);
+        }
 
-                int[] max = new int[4];
-                for (int i = 0; i < max.length; i++)
-                    max[i] = freeTypeList.size() > 0 ? Math.min(freeResource.get(freeTypeList.get(i)), need + 2) : 0;
+        int[] max = new int[4];
+        for (int i = 0; i < max.length; i++)
+            max[i] = Math.min(freeResource.get(freeTypeList.get(i)), need + 2);
 
-                int[] givenCount = new int[4];
-                for (givenCount[0] = max[0]; givenCount[0] >= 0; givenCount[0]--) {
-                    for (givenCount[1] = Math.min(max[1], need + 2 - givenCount[0]); givenCount[1] >= 0; givenCount[1]--) {
-                        for (givenCount[2] = Math.min(max[2], need + 2 - givenCount[0] - givenCount[1]); givenCount[2] >= 0; givenCount[2]--) {
-                            for (givenCount[3] = Math.min(max[3], need + 2 - givenCount[0] - givenCount[1] - givenCount[2]); givenCount[3] >= 0; givenCount[3]--) {
-                                Resource bidBefore = new Resource(bid);
+        int[] givenCount = new int[4];
+        for (givenCount[0] = max[0]; givenCount[0] >= 0; givenCount[0]--) {
+            for (givenCount[1] = Math.max(max[1] - givenCount[0], 0); givenCount[1] >= 0; givenCount[1]--) {
+                for (givenCount[2] = Math.max(max[2] - givenCount[0] - givenCount[1], 0); givenCount[2] >= 0; givenCount[2]--) {
+                    for (givenCount[3] = Math.max(max[3] - givenCount[0] - givenCount[1] - givenCount[2], 0); givenCount[3] >= 0; givenCount[3]--) {
+                        Resource copyChange = new Resource(change);
 
-                                for (int i = 0; i < freeTypeList.size() - 1; i++)
-                                    bid.add(freeTypeList.get(i), -givenCount[i]);
+                        if (givenCount[0] + givenCount[1] + givenCount[2] + givenCount[3] == 0)
+                            continue;
 
-                                // ?
-                                // At least one resourceType must be negative.
-                                boolean isValid = false;
-                                for (ResourceType resourceType : ResourceType.values()) {
-                                    if (bid.get(resourceType) < 0) {
-                                        isValid = true;
-                                        break;
-                                    }
-                                }
+                        for (int i = 0; i < 4; i++)
+                            copyChange.put(freeTypeList.get(i), -givenCount[i]);
 
-                                // ?
-                                Bid addedBid = new Bid(bid);
-                                if (isValid && !getBidRanking().contains(addedBid))
-                                    addBidToBidRanking(addedBid);
-
-                                bid = bidBefore;
-                            }
-                        }
+                        // ?
+                        Bid addedBid = new Bid(copyChange);
+                        if (!getBidRanking().contains(addedBid))
+                            addBidToBidRanking(addedBid);
                     }
                 }
             }
         }
     }
 
-    private void initialization() {
-        locScores = new HashMap<>();
+    @Override
+    public void initialization() {
 
-        locScores.put(SETTLEMENT, new Double[getBoard().getLocations().size()]);
+    }
+
+    public void cleaning() {
+        locScores = new HashMap<>();
+        locScores.put(SETTLEMENT, new Double[getVirtualBoard().getLocations().size()]);
+
+        me = getVirtualBoard().getPlayers().get(getOwner().getIndex());
 
         updateLocationScores_for(SETTLEMENT);
         updatePossibleActions();
-        updateResourceWeights(); // ?
+        updateResourceWeights(getVirtualBoard()); // ?
     }
 
     private void doAction(IAction action) {
@@ -505,24 +514,23 @@ public class ST0 extends AI {
 
         updateLocationScores_for(SETTLEMENT);
         updatePossibleActions();
+        updateResourceWeights(getVirtualBoard()); // ?
     }
 
-    private void updateResourceWeights() {
-        System.out.println("    TRIGGERED");
-
-        State.StateBuilder stateBuilder = new State.StateBuilder(Board.deepCopy(getBoard()));
+    private void updateResourceWeights(Board board) {
+        State.StateBuilder stateBuilder = new State.StateBuilder(Board.deepCopy(board));
         State state = stateBuilder.build();
-        ArrayList<IAction> possibleActions = state.getPossibleActions(getOwner().getIndex());
+        //ArrayList<IAction> possibleActions = state.getPossibleActions(getOwner().getIndex());
 
-        int createSettlement_size = Global.getActions_of(possibleActions, CreateSettlement.class).size();
+        /*int createSettlement_size = Global.getActions_of(possibleActions, CreateSettlement.class).size();
         int createRoad_size = Global.getActions_of(possibleActions, CreateRoad.class).size();
         int upgradeSettlement_size = Global.getActions_of(possibleActions, UpgradeSettlement.class).size();
-        int drawDevelopmentCard_size = Global.getActions_of(possibleActions, DrawDevelopmentCard.class).size();
+        int drawDevelopmentCard_size = Global.getActions_of(possibleActions, DrawDevelopmentCard.class).size();*/
 
         for (ResourceType resourceType : ResourceType.values())
             resourceWeights.put(resourceType, 0.0);
 
-        HashMap<Action, Integer> missingResources = new HashMap<>();
+        HashMap<ActionType, Integer> missingResources = new HashMap<>();
 
         int settlement_missing = 0;
         Resource missingResourceFor_settlement = new Resource(Settlement.COST);
@@ -533,7 +541,7 @@ public class ST0 extends AI {
                     && missingResourceFor_settlement.get(resourceType) > 0)
                 settlement_missing += missingResourceFor_settlement.get(resourceType);
         }
-        missingResources.put(Action.CreateSettlement, settlement_missing);
+        missingResources.put(ActionType.CreateSettlement, settlement_missing);
 
         int road_missing = 0;
         Resource missingResourceFor_road = new Resource(Road.COST);
@@ -542,7 +550,7 @@ public class ST0 extends AI {
             if ((resourceType.equals(ResourceType.BRICK) || resourceType.equals(ResourceType.LUMBER)) && missingResourceFor_road.get(resourceType) > 0)
                 road_missing -= missingResourceFor_road.get(resourceType);
         }
-        missingResources.put(Action.CreateRoad, road_missing);
+        missingResources.put(ActionType.CreateRoad, road_missing);
 
         int city_missing = 0;
         Resource missingResourceFor_city = new Resource(City.COST);
@@ -551,7 +559,7 @@ public class ST0 extends AI {
             if ((resourceType.equals(ResourceType.GRAIN) || resourceType.equals(ResourceType.ORE)) && missingResourceFor_city.get(resourceType) > 0)
                 city_missing -= missingResourceFor_city.get(resourceType);
         }
-        missingResources.put(Action.UpgradeSettlement, city_missing);
+        missingResources.put(ActionType.UpgradeSettlement, city_missing);
 
         int draw_missing = 0;
         Resource missingResourceFor_draw = new Resource(DrawDevelopmentCard.COST);
@@ -560,35 +568,47 @@ public class ST0 extends AI {
             if ((resourceType.equals(ResourceType.ORE) || resourceType.equals(ResourceType.GRAIN) || resourceType.equals(ResourceType.WOOL)) && missingResourceFor_draw.get(resourceType) > 0)
                 draw_missing -= missingResourceFor_draw.get(resourceType);
         }
-        missingResources.put(Action.DrawDevCard, draw_missing);
+        missingResources.put(ActionType.DrawDevCard, draw_missing);
 
-        System.out.print("    " + getOwner() + "'s Negotiation Calculations:");
+        //System.out.print("    " + getOwner() + "'s Resource Weight Calculations:");
 
-        Action chosenAction = null;
+        ActionType chosenAction = null;
         int chosenAction_score = Integer.MIN_VALUE;
-        for (Action actionType : missingResources.keySet()) {
+        for (ActionType actionType : missingResources.keySet()) {
             int score = -missingResources.get(actionType) * 10;
-            score += actionType.equals(Action.CreateSettlement) ? 15 : 0;
+            score += actionType.equals(ActionType.CreateSettlement) ? 15 : 0;
             score -= missingResources.get(actionType) == 0 ? 75 : 0;
 
-            if (actionType.equals(Action.CreateSettlement)) {
+            if (actionType.equals(ActionType.CreateSettlement)) {
                 if (state.getVictoryPoints(getOwner().getIndex()) == Global.MAX_VICTORY_POINTS - 1)
                     score += 50;
-            } else if (actionType.equals(Action.UpgradeSettlement)) {
+            } else if (actionType.equals(ActionType.UpgradeSettlement)) {
                 if (state.getVictoryPoints(getOwner().getIndex()) == Global.MAX_VICTORY_POINTS - 1)
                     score += 50;
-            } else if (actionType.equals(Action.DrawDevCard)) {
-                if (state.getVictoryPoints(getOwner().getIndex()) == Global.MAX_VICTORY_POINTS - 1)
-                    score += 50;
+            } else if (actionType.equals(ActionType.DrawDevCard)) {
+                if (state.getVictoryPoints(getOwner().getIndex()) == Global.MAX_VICTORY_POINTS - 1) {
+                    score += 35;
 
-                if (state.getVictoryPoints(getOwner().getIndex()) == Global.MAX_VICTORY_POINTS - 1 /*&&
-                    state.getKnights(getOwner().getIndex()) - state.getKnights_max() <= 1*/)
-                    score += 50;
-            } else if (actionType.equals(Action.CreateRoad)) {
+                    int knightsMax = 0;
+                    int myKnights = board.getPlayers().get(getOwner().getIndex()).getKnights();
+                    int knightsMax_repeat = 0;
+                    for (Player player : board.getPlayers()) {
+                        int knights = player.getKnights();
+                        if (knights > knightsMax) {
+                            knightsMax = knights;
+                            knightsMax_repeat = 1;
+                        } else if (knights == knightsMax)
+                            knightsMax_repeat++;
+                    }
+
+                    if (myKnights == knightsMax && knightsMax > 1)
+                        score += (knightsMax_repeat - 1) * 30;
+                }
+            } else if (actionType.equals(ActionType.CreateRoad)) {
                 int longestRoad_length = 0;
                 int myLongestRoad = 0;
                 int longestRoad_repeat = 0;
-                for (Player player : getBoard().getPlayers()) {
+                for (Player player : board.getPlayers()) {
                     int length = state.getLongestRoad_lengths().get(player.getIndex());
                     if (length > longestRoad_length) {
                         longestRoad_length = length;
@@ -607,30 +627,32 @@ public class ST0 extends AI {
             if (score > chosenAction_score) {
                 chosenAction_score = score;
                 chosenAction = actionType;
+                resourceWeights_target = chosenAction;
             }
 
-            System.out.print("  " + actionType + "'s score: " + score);
+            //System.out.print("  " + actionType + "'s score: " + score);
         }
 
-        if (chosenAction == Action.CreateRoad) {
+        if (resourceWeights_target == ActionType.CreateRoad) {
+            resourceWeights_target = chosenAction;
             resourceWeights.put(BRICK, 0.3);
             resourceWeights.put(LUMBER, 0.3);
             resourceWeights.put(ORE, 0.08);
             resourceWeights.put(GRAIN, 0.16);
             resourceWeights.put(WOOL, 0.16);
-        } else if (chosenAction == Action.CreateSettlement) {
+        } else if (resourceWeights_target == ActionType.CreateSettlement) {
             resourceWeights.put(BRICK, 0.22);
             resourceWeights.put(LUMBER, 0.22);
             resourceWeights.put(ORE, 0.12);
             resourceWeights.put(GRAIN, 0.22);
             resourceWeights.put(WOOL, 0.22);
-        } else if (chosenAction == Action.UpgradeSettlement) {
+        } else if (resourceWeights_target == ActionType.UpgradeSettlement) {
             resourceWeights.put(BRICK, 0.25 / 3);
             resourceWeights.put(LUMBER, 0.25 / 3);
             resourceWeights.put(ORE, 0.3);
             resourceWeights.put(GRAIN, 0.45);
             resourceWeights.put(WOOL, 0.25 / 3);
-        } else if (chosenAction == Action.DrawDevCard) {
+        } else if (resourceWeights_target == ActionType.DrawDevCard) {
             resourceWeights.put(BRICK, 0.13 / 2);
             resourceWeights.put(LUMBER, 0.13 / 2);
             resourceWeights.put(ORE, 0.29);
@@ -638,7 +660,7 @@ public class ST0 extends AI {
             resourceWeights.put(WOOL, 0.29);
         }
 
-        System.out.println("   [" + getOwner() + " wants to " + chosenAction + "]");
+        //System.out.println("   [" + getOwner() + " wants to " + chosenAction + "]");
     }
 
     private void updateLocationScores_for(StructureType structureType) {
@@ -658,7 +680,7 @@ public class ST0 extends AI {
 
         if (structureType == SETTLEMENT) {
             for (int i = 0; i < _locScores.length; i++) {
-                Location location = getBoard().getLocations().get(i);
+                Location location = getVirtualBoard().getLocations().get(i);
 
                 _locScores[i] = 0.0;
                 for (Land land : location.getAdjacentLands()) {
@@ -689,10 +711,5 @@ public class ST0 extends AI {
 
     private boolean skippedTooMuch() {
         return sequentialSkips > 4;
-    }
-
-    private void makeAllPositive(Double[] array) {
-        for (int i = 0; i < array.length; i++)
-            array[i] = Math.abs(array[i]);
     }
 }
